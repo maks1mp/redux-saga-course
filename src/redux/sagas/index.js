@@ -1,42 +1,45 @@
-import {takeEvery, put, call, fork, spawn, join, select} from 'redux-saga/effects';
+import {fork, spawn, call, all, delay, take, takeLatest, cancel, actionChannel} from 'redux-saga/effects';
+import loadBasicData from './initialSagas';
+import pageLoaderSaga from './pageLoaderSaga';
 
-async function swapiGet(pattern) {
-    const request = await fetch(`http://swapi.dev/api/${pattern}`);
+export function* fetchPlanets() {
+    console.log('LOAD_SOME_DATA starts');
 
-    const data = await request.json();
+    const response = yield call(fetch, 'https://swapi.dev/api/planets');
+    const data = yield call([response, response.json]);
 
-    return data;
+    console.log('LOAD_SOME_DATA completed', data);
 }
 
-export function* loadPeople() {
-    const people = yield call(swapiGet, 'people');
+export function* loadOnAction() {
+    const channel = yield actionChannel('LOAD_SOME_DATA');
 
-    yield put({type: 'SET_PEOPLE', payload: people.results});
-    console.log('load people!');
+    while (true) {
+        yield take(channel);
 
-    return people;
-}
-
-export function* loadPlanets() {
-    const planets = yield call(swapiGet, 'planets');
-
-    yield put({type: 'SET_PLANETS', payload: planets.results});
-    console.log('load planets!');
-}
-
-export function* workerSaga() {
-    console.log('run parallel tasks');
-    yield call(loadPeople);
-    yield fork(loadPlanets);
-
-    const store = yield select(s => s);
-    console.log('finish parallel tasks', store);
-}
-
-export function* watchLoadDataSaga() {
-    yield takeEvery('LOAD_DATA', workerSaga);
+        yield call(fetchPlanets);
+    }
 }
 
 export default function* rootSaga() {
-    yield fork(watchLoadDataSaga);
+    const sagas = [
+        // loadBasicData,
+        // pageLoaderSaga,
+        loadOnAction
+    ];
+
+    const retrySagas = yield sagas.map(saga => {
+        return spawn(function* () {
+            while (true) {
+                try {
+                    yield call(saga);
+                    break;
+                } catch (e) {
+                    console.log(e);
+                }
+            }
+        })
+    });
+
+    yield all(retrySagas);
 }
